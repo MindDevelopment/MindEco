@@ -45,7 +45,7 @@ cd MindEco
 chmod +x eco.js
 ```
 
-Optionally, create a global symlink:
+Optionally, create a global symlink (see [Docs/LINKING.md](Docs/LINKING.md) for more options):
 
 ```bash
 npm link
@@ -114,8 +114,24 @@ When adding a project, MindEco automatically scans for entry scripts in this ord
 ```
 MindEco/
 ├── eco.js          # Main application (single file)
-└── README.md       # This file
+├── README.md       # This file
+└── Docs/           # Documentation
+    ├── LINKING.md         # How to link eco globally
+    ├── PM2.md             # PM2 command reference
+    ├── CONFIGURATION.md   # Configuration guide
+    ├── TROUBLESHOOTING.md # Common issues & solutions
+    └── CONTRIBUTING.md    # Contribution guidelines
 ```
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [LINKING.md](Docs/LINKING.md) | How to make `eco` command available globally via npm link, symlink, alias, or PATH |
+| [PM2.md](Docs/PM2.md) | Complete PM2 command reference for starting, stopping, and managing processes |
+| [CONFIGURATION.md](Docs/CONFIGURATION.md) | Configuration files, backups, environment variables, and project settings |
+| [TROUBLESHOOTING.md](Docs/TROUBLESHOOTING.md) | Common issues and solutions for MindEco, PM2, and database connections |
+| [CONTRIBUTING.md](Docs/CONTRIBUTING.md) | Guidelines for contributing to the project, code style, and pull request process |
 
 ## How It Works
 
