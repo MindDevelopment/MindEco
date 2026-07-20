@@ -18,7 +18,9 @@ const { exec, spawn } = require('child_process');
 // ─── CONFIG ────────────────────────────────────────────────
 const HOME = os.homedir();
 const CONFIG = {
-    VERSION:          '1.0.0',
+    VERSION:          '1.5.0',
+    REPO_OWNER:       'MindDevelopment',
+    REPO_NAME:        'MindEco',
     HOME,
     PROJECTS:         path.join(HOME, 'Projects'),
     ECOSYSTEM_FILE:   path.join(HOME, 'ecosystem.config.js'),
@@ -97,6 +99,73 @@ function warn(text) {
 
 function info(text) {
     return `${THEME.info}${C.bold}ℹ${C.reset} ${THEME.info}${text}${C.reset}`;
+}
+
+// ─── VERSION CHECK ────────────────────────────────────────
+async function checkForUpdates() {
+    return new Promise((resolve) => {
+        const https = require('https');
+        const url = `https://api.github.com/repos/${CONFIG.REPO_OWNER}/${CONFIG.REPO_NAME}/releases/latest`;
+        
+        const options = {
+            headers: {
+                'User-Agent': 'MindEco-Version-Check',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        };
+        
+        const req = https.get(url, options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+                try {
+                    if (res.statusCode === 200) {
+                        const release = JSON.parse(data);
+                        const latestVersion = release.tag_name.replace(/^v/, '');
+                        const downloadUrl = release.html_url;
+                        const isOutdated = latestVersion !== CONFIG.VERSION;
+                        resolve({
+                            isOutdated,
+                            currentVersion: CONFIG.VERSION,
+                            latestVersion,
+                            downloadUrl
+                        });
+                    } else {
+                        resolve({ isOutdated: false, currentVersion: CONFIG.VERSION, error: 'Could not check for updates' });
+                    }
+                } catch (e) {
+                    resolve({ isOutdated: false, currentVersion: CONFIG.VERSION, error: 'Could not parse update info' });
+                }
+            });
+        });
+        
+        req.on('error', () => {
+            resolve({ isOutdated: false, currentVersion: CONFIG.VERSION, error: 'Could not connect to GitHub' });
+        });
+        
+        req.setTimeout(5000, () => {
+            req.destroy();
+            resolve({ isOutdated: false, currentVersion: CONFIG.VERSION, error: 'Connection timeout' });
+        });
+    });
+}
+
+function formatVersionStatus(updateInfo) {
+    const screenWidth = getTerminalWidth();
+    const versionText = `Version: ${updateInfo.currentVersion}`;
+    
+    if (updateInfo.isOutdated) {
+        const outdatedText = `OUTDATED! Please update to version: ${updateInfo.latestVersion}`;
+        const downloadText = `Download: ${updateInfo.downloadUrl}`;
+        
+        return [
+            `${THEME.muted}${versionText}${C.reset}`,
+            `${THEME.danger}${C.bold}⚠ ${outdatedText}${C.reset}`,
+            `${THEME.info}${downloadText}${C.reset}`,
+        ];
+    }
+    
+    return [`${THEME.muted}${versionText}${C.reset}`];
 }
 
 // Visual length - strip ANSI codes, handle wide chars
@@ -659,7 +728,7 @@ async function showDashboard(extraLines = [], opts = {}) {
 
 // ─── DASHBOARD RENDERER ───────────────────────────────────
 
-function renderMainDashboard(config, pm2Status) {
+function renderMainDashboard(config, pm2Status, updateInfo = null) {
     const logoLines = getLogoLines();
     const maxLogoWidth = logoLines.length > 0 ? logoLines.reduce((m, l) => Math.max(m, vlen(l)), 0) : 0;
     const screenWidth = getTerminalWidth();
@@ -747,9 +816,25 @@ function renderMainDashboard(config, pm2Status) {
     // Footer section
     out.push(sepFull(INNER, bc));
     const copyrightText = `© 2026 MindDevelopment`;
-    const versionText = `Version: ${CONFIG.VERSION}`;
-    const footerContent = `${THEME.muted}${copyrightText}${C.reset}${' '.repeat(Math.max(2, INNER - vlen(copyrightText) - vlen(versionText) - 4))}${THEME.muted}${versionText}${C.reset}`;
-    out.push(`${bc}║${C.reset} ${padRight(footerContent, INNER - 2)} ${bc}║${C.reset}`);
+    
+    if (updateInfo && updateInfo.isOutdated) {
+        const versionText = `Version: ${updateInfo.currentVersion}`;
+        const outdatedText = `OUTDATED! Update to: ${updateInfo.latestVersion}`;
+        const downloadText = `${updateInfo.downloadUrl}`;
+        
+        // Copyright + Version regel
+        const footerContent1 = `${THEME.muted}${copyrightText}${C.reset}${' '.repeat(Math.max(2, INNER - vlen(copyrightText) - vlen(versionText) - 4))}${THEME.muted}${versionText}${C.reset}`;
+        out.push(`${bc}║${C.reset} ${padRight(footerContent1, INNER - 2)} ${bc}║${C.reset}`);
+        
+        // Outdated waarschuwing
+        out.push(sepFull(INNER, bc));
+        out.push(`${bc}║${C.reset}${padRight(` ${THEME.danger}${C.bold}⚠  ${outdatedText}${C.reset}`, INNER - 0)}${bc}║${C.reset}`);
+        out.push(`${bc}║${C.reset}${padRight(` ${THEME.info}Download: ${downloadText}${C.reset}`, INNER - 0)}${bc}║${C.reset}`);
+    } else {
+        const versionText = updateInfo ? `Version: ${updateInfo.currentVersion}` : `Version: ${CONFIG.VERSION}`;
+        const footerContent = `${THEME.muted}${copyrightText}${C.reset}${' '.repeat(Math.max(2, INNER - vlen(copyrightText) - vlen(versionText) - 4))}${THEME.muted}${versionText}${C.reset}`;
+        out.push(`${bc}║${C.reset} ${padRight(footerContent, INNER - 2)} ${bc}║${C.reset}`);
+    }
 
     out.push(boxBottom(INNER, bc));
     return out.join('\n');
@@ -758,12 +843,15 @@ function renderMainDashboard(config, pm2Status) {
 // ─── MENU SYSTEM ───────────────────────────────────────────
 
 async function mainMenu() {
+    // Check for updates once at startup
+    const updateInfo = await checkForUpdates();
+    
     while (true) {
         const config = readEcosystem();
         const pm2Status = await getPm2Status();
 
         console.clear();
-        console.log(`\n${renderMainDashboard(config, pm2Status)}\n`);
+        console.log(`\n${renderMainDashboard(config, pm2Status, updateInfo)}\n`);
 
         const choice = (await ask(`  ${THEME.highlight}Choose an option [0-9]:${C.reset} `)).trim();
 
