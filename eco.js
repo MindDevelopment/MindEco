@@ -65,13 +65,21 @@ const THEME = {
 };
 
 // ─── READLINE ──────────────────────────────────────────────
-const rl = readline.createInterface({
+let rl = readline.createInterface({
     input:  process.stdin,
     output: process.stdout,
 });
 
 function ask(q) {
     return new Promise(resolve => rl.question(q, answer => resolve(answer)));
+}
+
+function recreateReadline() {
+    rl.close();
+    rl = readline.createInterface({
+        input:  process.stdin,
+        output: process.stdout,
+    });
 }
 
 // ─── HELPERS ───────────────────────────────────────────────
@@ -687,25 +695,37 @@ function getFullLogo() {
     const statusLines = [];
     const screenWidth = getTerminalWidth();
 
-    const neededWidth = logoLines.reduce((max, l) => Math.max(max, vlen(l)), 0);
-
     if (config.apps.length === 0) {
         statusLines.push('');
         statusLines.push(`${THEME.muted}  (no projects added yet)${C.reset}`);
         statusLines.push(`  ${THEME.muted}Use 'Add project' to get started${C.reset}`);
     }
 
-    const maxW = Math.max(neededWidth, statusLines.reduce((m, l) => Math.max(m, vlen(l)), 0));
-    const sep = `${THEME.muted}${repeat('═', maxW + 2)}${C.reset}`;
+    const INNER = Math.max(60, screenWidth - 4);
+    const bc = THEME.border;
+    const out = [];
 
-    const all = [...logoLines];
-    if (statusLines.length > 0) {
-        all.push(sep);
-        all.push(...statusLines);
+    out.push(boxTop(INNER, bc));
+
+    // Centered logo
+    if (logoLines.length > 0) {
+        const logoW = logoLines.reduce((m, l) => Math.max(m, vlen(l)), 0);
+        const logoPad = Math.max(0, Math.floor((INNER - logoW) / 2));
+        for (const l of logoLines) {
+            const rPad = Math.max(0, INNER - logoPad - vlen(l));
+            out.push(`${bc}║${C.reset}${' '.repeat(logoPad)}${l}${' '.repeat(rPad)}${bc}║${C.reset}`);
+        }
     }
 
-    const minWidth = Math.min(65, screenWidth - 4);
-    return boxify(all, { borderColor: THEME.border, minWidth });
+    if (statusLines.length > 0) {
+        out.push(sepFull(INNER, bc));
+        for (const l of statusLines) {
+            out.push(fullRow(l, INNER, bc));
+        }
+    }
+
+    out.push(boxBottom(INNER, bc));
+    return out.join('\n');
 }
 
 async function showDashboard(extraLines = [], opts = {}) {
@@ -715,14 +735,25 @@ async function showDashboard(extraLines = [], opts = {}) {
 
     if (extraLines.length > 0) {
         const screenWidth = getTerminalWidth();
-        const minWidth = Math.min(opts.minWidth || 60, screenWidth - 4);
-        const box = boxify(extraLines, {
-            title: opts.title || '',
-            titleColor: opts.titleColor || THEME.secondary,
-            borderColor: opts.borderColor || THEME.border,
-            minWidth,
-        });
-        console.log(box + '\n');
+        const INNER = Math.max(60, screenWidth - 4);
+        const bc = THEME.border;
+        const out = [];
+
+        out.push(boxTop(INNER, bc));
+
+        if (opts.title) {
+            const titleLen = vlen(opts.title);
+            const lPad = Math.max(0, Math.floor((INNER - titleLen) / 2));
+            const rPad = Math.max(0, INNER - titleLen - lPad);
+            out.push(`${bc}║${C.reset}${' '.repeat(lPad)}${opts.titleColor || THEME.secondary}${C.bold}${opts.title}${C.reset}${' '.repeat(rPad)}${bc}║${C.reset}`);
+            out.push(sepFull(INNER, bc));
+        }
+
+        for (const l of extraLines) {
+            out.push(fullRow(l, INNER, bc));
+        }
+        out.push(boxBottom(INNER, bc));
+        console.log(out.join('\n') + '\n');
     }
 }
 
@@ -730,9 +761,8 @@ async function showDashboard(extraLines = [], opts = {}) {
 
 function renderMainDashboard(config, pm2Status, updateInfo = null) {
     const logoLines = getLogoLines();
-    const maxLogoWidth = logoLines.length > 0 ? logoLines.reduce((m, l) => Math.max(m, vlen(l)), 0) : 0;
     const screenWidth = getTerminalWidth();
-    const INNER = Math.min(Math.max(maxLogoWidth + 3, 50), screenWidth - 4);
+    const INNER = Math.max(60, screenWidth - 4);
     const bc = THEME.border;
     const menuColor = rgb(255, 220, 200);
     const numColor = rgb(255, 190, 90);
@@ -740,10 +770,13 @@ function renderMainDashboard(config, pm2Status, updateInfo = null) {
 
     out.push(boxTop(INNER, bc));
 
-    // Logo (alleen op grotere schermen)
+    // Centered logo
     if (logoLines.length > 0) {
+        const logoW = logoLines.reduce((m, l) => Math.max(m, vlen(l)), 0);
+        const logoPad = Math.max(0, Math.floor((INNER - logoW) / 2));
         for (const l of logoLines) {
-            out.push(fullRow(l, INNER, bc));
+            const rPad = Math.max(0, INNER - logoPad - vlen(l));
+            out.push(`${bc}║${C.reset}${' '.repeat(logoPad)}${l}${' '.repeat(rPad)}${bc}║${C.reset}`);
         }
         out.push(sepFull(INNER, bc));
     }
@@ -806,6 +839,7 @@ function renderMainDashboard(config, pm2Status, updateInfo = null) {
         { num: '4', text: 'View projects' },
         { num: '5', text: 'Create backup' },
         { num: '6', text: 'Restore backup' },
+        { num: '7', text: 'Monitor (real-time)', color: THEME.info },
         { num: '0', text: 'Exit', color: THEME.danger },
     ];
     for (const item of menuItems) {
@@ -853,7 +887,7 @@ async function mainMenu() {
         console.clear();
         console.log(`\n${renderMainDashboard(config, pm2Status, updateInfo)}\n`);
 
-        const choice = (await ask(`  ${THEME.highlight}Choose an option [0-9]:${C.reset} `)).trim();
+        const choice = (await ask(`  ${THEME.highlight}Choose an option [0-7]:${C.reset} `)).trim();
 
         switch (choice) {
             case '1': await addProject(); break;
@@ -862,6 +896,7 @@ async function mainMenu() {
             case '4': await viewProjects(); break;
             case '5': await makeBackup(); break;
             case '6': await restoreBackup(); break;
+            case '7': await startMonitor(); break;
             case '0':
                 console.log(`\n  ${THEME.secondary}Goodbye!${C.reset}\n`);
                 rl.close();
@@ -1210,6 +1245,201 @@ async function makeBackup() {
         await showDashboard([error('Could not create backup.')], { title: 'Backup' });
     }
     await pause();
+}
+
+// ─── ASCII BAR HELPER ─────────────────────────────────────
+function asciiBar(value, max, width, fillChar = '█', emptyChar = '░') {
+    const pct = max > 0 ? Math.min(1, value / max) : 0;
+    const filled = Math.round(pct * width);
+    return fillChar.repeat(filled) + emptyChar.repeat(width - filled);
+}
+
+function cpuColor(pct) {
+    if (pct < 30) return THEME.success;
+    if (pct < 70) return THEME.warning;
+    return THEME.danger;
+}
+
+function memColor(bytes) {
+    const mb = bytes / (1024 * 1024);
+    if (mb < 100) return THEME.success;
+    if (mb < 500) return THEME.warning;
+    return THEME.danger;
+}
+
+// Build a row from fixed-width cells
+function buildRow(cells, colWidths) {
+    let row = '';
+    for (let i = 0; i < cells.length; i++) {
+        if (i > 0) row += ' ';
+        row += padRight(cells[i], colWidths[i]);
+    }
+    return row;
+}
+
+// ─── COMMAND: REAL-TIME MONITOR ───────────────────────────
+function renderMonitorDashboard(pm2Status, config) {
+    const logoLines = getLogoLines();
+    const screenWidth = getTerminalWidth();
+    const INNER = Math.max(60, screenWidth - 4);
+    const bc = THEME.border;
+    const out = [];
+
+    out.push(boxTop(INNER, bc));
+
+    // Centered logo
+    if (logoLines.length > 0) {
+        const logoW = logoLines.reduce((m, l) => Math.max(m, vlen(l)), 0);
+        const logoPad = Math.max(0, Math.floor((INNER - logoW) / 2));
+        for (const l of logoLines) {
+            const rightPad = Math.max(0, INNER - logoPad - vlen(l));
+            out.push(`${bc}║${C.reset}${' '.repeat(logoPad)}${l}${' '.repeat(rightPad)}${bc}║${C.reset}`);
+        }
+        out.push(sepFull(INNER, bc));
+    }
+
+    // Title
+    const titleText = 'Real-time Monitor';
+    const titleLen = vlen(titleText);
+    const leftPad = Math.max(0, Math.floor((INNER - titleLen) / 2));
+    const rightPad = Math.max(0, INNER - titleLen - leftPad);
+    out.push(`${bc}║${C.reset}${' '.repeat(leftPad)}${THEME.info}${C.bold}${titleText}${C.reset}${' '.repeat(rightPad)}${bc}║${C.reset}`);
+    out.push(sepFull(INNER, bc));
+
+    if (config.apps.length === 0) {
+        out.push(fullRow(`  ${THEME.muted}(no projects to monitor)${C.reset}`, INNER, bc));
+    } else {
+        const now = new Date().toLocaleTimeString();
+        const usable = INNER - 2;
+
+        // Fixed bar width - bars stay compact regardless of terminal width
+        const barWidth = 15;
+        const colStatus = 7;
+        const colCPU = barWidth + 6;
+        const colMem = barWidth + 7;
+        const colUptime = 10;
+        const colR = 3;
+        // Name gets all remaining space
+        const colName = Math.max(14, usable - colStatus - colCPU - colMem - colUptime - colR - 5);
+
+        const colWidths = [colName, colStatus, colCPU, colMem, colUptime, colR];
+
+        // Header
+        const hdr = buildRow(['  Process', 'Status', ' CPU', ' Memory', ' Uptime', ' R'], colWidths);
+        out.push(`${bc}║${C.reset}${padRight(hdr, usable + 2)}${bc}║${C.reset}`);
+
+        // Thin separator
+        out.push(`${bc}╟${repeat('─', usable + 2)}╢${C.reset}`);
+
+        // Data rows
+        for (const app of config.apps) {
+            const status = pm2Status[app.name] || { status: 'not_found', cpu: 0, memory: 0, uptime: '—', restarts: 0 };
+            const icon = Project.statusIcon(status.status);
+
+            const nameStr = `  ${icon} ${C.bold}${truncate(app.name, colName - 6)}${C.reset}`;
+
+            const statusStr = status.status === 'online' ? `${THEME.online}on${C.reset}` :
+                              status.status === 'stopped' ? `${THEME.stopped}off${C.reset}` :
+                              status.status === 'errored' ? `${THEME.danger}err${C.reset}` :
+                              `${THEME.muted}—${C.reset}`;
+
+            const cpuPct = Math.round(status.cpu || 0);
+            const cpuBar = `${cpuColor(cpuPct)}${asciiBar(cpuPct, 100, colCPU - 6)}${C.reset} ${C.bold}${String(cpuPct).padStart(3)}%${C.reset}`;
+
+            const memBytes = status.memory || 0;
+            const memMB = (memBytes / (1024 * 1024)).toFixed(0);
+            const memBar = `${memColor(memBytes)}${asciiBar(memBytes / (1024 * 1024), 1024, colMem - 7)}${C.reset} ${C.bold}${memMB.padStart(4)}M${C.reset}`;
+
+            const upStr = ` ${C.dim}${status.uptime || '—'}${C.reset}`;
+            const rStr = `${status.restarts > 0 ? THEME.danger : THEME.muted}${status.restarts}${C.reset}`;
+
+            const row = buildRow([nameStr, statusStr, cpuBar, memBar, upStr, rStr], colWidths);
+            out.push(`${bc}║${C.reset}${padRight(row, usable + 2)}${bc}║${C.reset}`);
+        }
+
+        // Bottom separator
+        out.push(`${bc}╟${repeat('─', usable + 2)}╢${C.reset}`);
+
+        // Totals
+        const onlineCount = config.apps.filter(a => (pm2Status[a.name] || {}).status === 'online').length;
+        const totalCPU = Object.values(pm2Status).reduce((sum, s) => sum + (s.cpu || 0), 0);
+        const totalMem = Object.values(pm2Status).reduce((sum, s) => sum + (s.memory || 0), 0);
+
+        const totals = `  ${C.dim}Proc:${C.reset} ${THEME.success}${C.bold}${onlineCount}${C.reset}${C.dim}/${config.apps.length} on  │  CPU:${C.reset} ${THEME.secondary}${Math.round(totalCPU)}%${C.reset}${C.dim}  │  Mem:${C.reset} ${THEME.secondary}${(totalMem / (1024 * 1024)).toFixed(0)} MB${C.reset}${C.dim}  │  ${now}${C.reset}`;
+        out.push(`${bc}║${C.reset}${padRight(totals, usable + 2)}${bc}║${C.reset}`);
+    }
+
+    // Footer
+    out.push(sepFull(INNER, bc));
+    out.push(fullRow(`  ${THEME.muted}Press [q] to exit monitor  |  Refreshing every 1s${C.reset}`, INNER, bc));
+    out.push(boxBottom(INNER, bc));
+
+    return out.join('\n');
+}
+
+async function startMonitor() {
+    const config = readEcosystem();
+    if (config.apps.length === 0) {
+        await showDashboard([info('No projects to monitor.')], { title: 'Monitor' });
+        await pause();
+        return;
+    }
+
+    let running = true;
+    let lastOutput = '';
+
+    // Set stdin to raw mode for single-key capture
+    const wasRaw = process.stdin.isRaw;
+    if (process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+    }
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+
+    const onKey = (key) => {
+        if (key === 'q' || key === 'Q' || key === '\x03') {
+            running = false;
+        }
+    };
+    process.stdin.on('data', onKey);
+
+    // Clear screen once at start
+    process.stdout.write('\x1b[2J\x1b[H');
+
+    while (running) {
+        const freshConfig = readEcosystem();
+        const pm2Status = await getPm2Status();
+        const output = `\n${renderMonitorDashboard(pm2Status, freshConfig)}`;
+
+        // Only redraw if content changed
+        if (output !== lastOutput) {
+            process.stdout.write('\x1b[H');
+            process.stdout.write(output);
+            lastOutput = output;
+        }
+
+        await new Promise(resolve => {
+            const timer = setTimeout(resolve, 1000);
+            const check = setInterval(() => {
+                if (!running) {
+                    clearTimeout(timer);
+                    clearInterval(check);
+                    resolve();
+                }
+            }, 100);
+        });
+    }
+
+    // Restore stdin and flush any buffered input
+    process.stdin.removeListener('data', onKey);
+    if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+    }
+    process.stdin.pause();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    process.stdin.resume();
+    // Recreate readline to discard any buffered 'q'
+    recreateReadline();
 }
 
 // ─── COMMAND: BACKUP HERSTELLEN ───────────────────────────
