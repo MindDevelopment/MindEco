@@ -1,4 +1,4 @@
-# MindEco
+# MindEco test
 
 <p align="center">
   <strong>Terminal-based PM2 Ecosystem Manager</strong>
